@@ -17,6 +17,9 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: List files in deployment directory
+        run: ls -la deployment
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
