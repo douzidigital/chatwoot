@@ -17,11 +17,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: List all files recursively
-        run: ls -R
-
       - name: Build the Docker image
-        run: docker build . --file Dockerfile.fazer --tag douzidigital/chatwoot-custom:latest
+        run: docker build . --file docker/Dockerfile --tag douzidigital/chatwoot-custom:latest
 
       - name: Push the Docker image
         run: docker push douzidigital/chatwoot-custom:latest
