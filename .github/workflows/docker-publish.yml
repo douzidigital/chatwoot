@@ -21,6 +21,5 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./deployment/docker-ce/Dockerfile
           push: true
           tags: douzidigital/chatwoot-custom:latest
