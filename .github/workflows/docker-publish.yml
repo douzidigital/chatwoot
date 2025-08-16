@@ -1,24 +1,28 @@
 name: Build and Publish Chatwoot Image
+
 on:
   push:
     branches: [ "main" ]
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
+      # 1. Baixa o código do seu repositório
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Faz o login no Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.fazer
-          push: true
-          tags: douzidigital/chatwoot-custom:latest
+      # 3. Constrói a imagem usando o comando direto
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile.fazer --tag douzidigital/chatwoot-custom:latest
+
+      # 4. Envia a imagem para o Docker Hub
+      - name: Push the Docker image
+        run: docker push douzidigital/chatwoot-custom:latest
