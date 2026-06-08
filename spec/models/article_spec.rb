@@ -10,7 +10,16 @@ RSpec.describe Article do
     it { is_expected.to validate_presence_of(:account_id) }
     it { is_expected.to validate_presence_of(:author_id) }
     it { is_expected.to validate_presence_of(:title) }
-    it { is_expected.to validate_presence_of(:content) }
+
+    it 'validates content presence only for published articles' do
+      article = build(:article, portal_id: portal_1.id, author_id: user.id, category_id: category_1.id,
+                                title: 'test', content: nil, status: :draft)
+      expect(article).to be_valid
+
+      article.status = :published
+      expect(article).not_to be_valid
+      expect(article.errors[:content]).to include("can't be blank")
+    end
   end
 
   describe 'associations' do
@@ -18,7 +27,6 @@ RSpec.describe Article do
     it { is_expected.to belong_to(:author) }
   end
 
-  # This validation happens in ApplicationRecord
   describe 'length validations' do
     let(:article) do
       create(:article, category_id: category_1.id, content: 'This is the content', description: 'this is the description',
@@ -33,9 +41,9 @@ RSpec.describe Article do
       end
 
       it 'invalid when crossed the limit' do
-        article.content = 'a' * 25_001
+        article.content = 'a' * 70_000
         article.valid?
-        expect(article.errors[:content]).to include('is too long (maximum is 20000 characters)')
+        expect(article.errors[:content]).to include('is too long (maximum is 65535 characters)')
       end
     end
   end

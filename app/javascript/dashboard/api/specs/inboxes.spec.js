@@ -12,6 +12,7 @@ describe('#InboxesAPI', () => {
     expect(inboxesAPI).toHaveProperty('getCampaigns');
     expect(inboxesAPI).toHaveProperty('getAgentBot');
     expect(inboxesAPI).toHaveProperty('setAgentBot');
+    expect(inboxesAPI).toHaveProperty('syncTemplates');
   });
 
   describe('API calls', () => {
@@ -39,6 +40,42 @@ describe('#InboxesAPI', () => {
     it('#deleteInboxAvatar', () => {
       inboxesAPI.deleteInboxAvatar(2);
       expect(axiosMock.delete).toHaveBeenCalledWith('/api/v1/inboxes/2/avatar');
+    });
+
+    it('#syncTemplates', () => {
+      inboxesAPI.syncTemplates(2);
+      expect(axiosMock.post).toHaveBeenCalledWith(
+        '/api/v1/inboxes/2/sync_templates'
+      );
+    });
+  });
+
+  describe('#updateCachedProviderConnection', () => {
+    it('patches the cached inbox record without touching the cache key', async () => {
+      inboxesAPI.dataManager.initDb = vi.fn().mockResolvedValue();
+      inboxesAPI.dataManager.update = vi.fn().mockResolvedValue();
+
+      await inboxesAPI.updateCachedProviderConnection(7, {
+        connection: 'open',
+      });
+
+      expect(inboxesAPI.dataManager.update).toHaveBeenCalledWith({
+        modelName: 'inbox',
+        id: 7,
+        data: { provider_connection: { connection: 'open' } },
+      });
+    });
+
+    it('swallows errors when IndexedDB is unavailable', async () => {
+      inboxesAPI.dataManager.initDb = vi
+        .fn()
+        .mockRejectedValue(new Error('no idb'));
+      inboxesAPI.dataManager.update = vi.fn();
+
+      await expect(
+        inboxesAPI.updateCachedProviderConnection(7, { connection: 'open' })
+      ).resolves.toBeUndefined();
+      expect(inboxesAPI.dataManager.update).not.toHaveBeenCalled();
     });
   });
 });

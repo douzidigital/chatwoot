@@ -12,20 +12,42 @@ export default {
   components: {
     NextButton,
   },
+  props: {
+    mode: {
+      type: String,
+      default: 'create',
+      validator: value => ['create', 'convert'].includes(value),
+    },
+    inbox: {
+      type: Object,
+      default: null,
+    },
+  },
   setup() {
     return { v$: useVuelidate() };
   },
   data() {
+    const isConvert = this.mode === 'convert';
     return {
-      inboxName: '',
-      phoneNumber: '',
+      inboxName: isConvert ? this.inbox?.name || '' : '',
+      phoneNumber: isConvert ? this.inbox?.phone_number || '' : '',
       apiKey: '',
       phoneNumberId: '',
       businessAccountId: '',
     };
   },
   computed: {
-    ...mapGetters({ uiFlags: 'inboxes/getUIFlags' }),
+    ...mapGetters({
+      uiFlags: 'inboxes/getUIFlags',
+    }),
+    isConvertMode() {
+      return this.mode === 'convert';
+    },
+    submitButtonLabel() {
+      return this.isConvertMode
+        ? this.$t('INBOX_MGMT.CONVERT.SUBMIT_BUTTON')
+        : this.$t('INBOX_MGMT.ADD.WHATSAPP.SUBMIT_BUTTON');
+    },
   },
   validations: {
     inboxName: { required },
@@ -35,6 +57,13 @@ export default {
     businessAccountId: { required, isNumber },
   },
   methods: {
+    buildProviderConfig() {
+      return {
+        api_key: this.apiKey,
+        phone_number_id: this.phoneNumberId,
+        business_account_id: this.businessAccountId,
+      };
+    },
     async createChannel() {
       this.v$.$touch();
       if (this.v$.$invalid) {
@@ -42,19 +71,33 @@ export default {
       }
 
       try {
+        if (this.isConvertMode) {
+          await this.$store.dispatch('inboxes/convertProvider', {
+            inboxId: this.inbox.id,
+            provider: 'whatsapp_cloud',
+            providerConfig: this.buildProviderConfig(),
+          });
+
+          useAlert(this.$t('INBOX_MGMT.CONVERT.API.SUCCESS_MESSAGE'));
+          router.replace({
+            name: 'settings_inbox_show',
+            params: {
+              accountId: router.currentRoute.value.params.accountId,
+              inboxId: this.inbox.id,
+            },
+          });
+          return;
+        }
+
         const whatsappChannel = await this.$store.dispatch(
           'inboxes/createChannel',
           {
-            name: this.inboxName,
+            name: this.inboxName?.trim(),
             channel: {
               type: 'whatsapp',
               phone_number: this.phoneNumber,
               provider: 'whatsapp_cloud',
-              provider_config: {
-                api_key: this.apiKey,
-                phone_number_id: this.phoneNumberId,
-                business_account_id: this.businessAccountId,
-              },
+              provider_config: this.buildProviderConfig(),
             },
           }
         );
@@ -68,7 +111,12 @@ export default {
         });
       } catch (error) {
         useAlert(
-          error.message || this.$t('INBOX_MGMT.ADD.WHATSAPP.API.ERROR_MESSAGE')
+          error.message ||
+            this.$t(
+              this.isConvertMode
+                ? 'INBOX_MGMT.CONVERT.API.ERROR_MESSAGE'
+                : 'INBOX_MGMT.ADD.WHATSAPP.API.ERROR_MESSAGE'
+            )
         );
       }
     },
@@ -84,6 +132,7 @@ export default {
         <input
           v-model="inboxName"
           type="text"
+          :disabled="isConvertMode"
           :placeholder="$t('INBOX_MGMT.ADD.WHATSAPP.INBOX_NAME.PLACEHOLDER')"
           @blur="v$.inboxName.$touch"
         />
@@ -99,6 +148,7 @@ export default {
         <input
           v-model="phoneNumber"
           type="text"
+          :disabled="isConvertMode"
           :placeholder="$t('INBOX_MGMT.ADD.WHATSAPP.PHONE_NUMBER.PLACEHOLDER')"
           @blur="v$.phoneNumber.$touch"
         />
@@ -165,11 +215,11 @@ export default {
 
     <div class="w-full mt-4">
       <NextButton
-        :is-loading="uiFlags.isCreating"
+        :is-loading="uiFlags.isCreating || uiFlags.isUpdating"
         type="submit"
         solid
         blue
-        :label="$t('INBOX_MGMT.ADD.WHATSAPP.SUBMIT_BUTTON')"
+        :label="submitButtonLabel"
       />
     </div>
   </form>

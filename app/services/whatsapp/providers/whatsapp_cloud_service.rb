@@ -1,4 +1,4 @@
-class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseService
+class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseService # rubocop:disable Metrics/ClassLength
   def send_message(phone_number, message)
     @message = message
 
@@ -6,24 +6,31 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
       send_attachment_message(phone_number, message)
     elsif message.content_type == 'input_select'
       send_interactive_text_message(phone_number, message)
+    elsif message.content_attributes[:is_reaction]
+      send_reaction_message(phone_number, message)
     else
       send_text_message(phone_number, message)
     end
   end
 
-  def send_template(phone_number, template_info)
+  def send_template(phone_number, template_info, message)
+    template_body = template_body_parameters(template_info)
+
+    request_body = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual', # Only individual messages supported (not group messages)
+      to: phone_number,
+      type: 'template',
+      template: template_body
+    }
+
     response = HTTParty.post(
       "#{phone_id_path}/messages",
       headers: api_headers,
-      body: {
-        messaging_product: 'whatsapp',
-        to: phone_number,
-        template: template_body_parameters(template_info),
-        type: 'template'
-      }.to_json
+      body: request_body.to_json
     )
 
-    process_response(response)
+    process_response(response, message)
   end
 
   def sync_templates
@@ -57,8 +64,65 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
     { 'Authorization' => "Bearer #{whatsapp_channel.provider_config['api_key']}", 'Content-Type' => 'application/json' }
   end
 
+  def create_csat_template(template_config)
+    csat_template_service.create_template(template_config)
+  end
+
+  def delete_csat_template(template_name = nil)
+    template_name ||= CsatTemplateNameService.csat_template_name(whatsapp_channel.inbox.id)
+    csat_template_service.delete_template(template_name)
+  end
+
+  def get_template_status(template_name)
+    csat_template_service.get_template_status(template_name)
+  end
+
   def media_url(media_id)
     "#{api_base_path}/v13.0/#{media_id}"
+  end
+
+  def toggle_typing_status(typing_status, last_message:, **)
+    return false unless [Events::Types::CONVERSATION_TYPING_ON, Events::Types::CONVERSATION_RECORDING].include?(typing_status)
+
+    response = HTTParty.post(
+      "#{phone_id_path('v23.0')}/messages",
+      headers: api_headers,
+      body: {
+        messaging_product: 'whatsapp',
+        message_id: last_message.source_id,
+        status: 'read',
+        # NOTE: API currently only supports "typing", no "recording" status.
+        typing_indicator: { type: 'text' }
+      }.to_json
+    )
+
+    Rails.logger.error(response.parsed_response) unless response.success?
+
+    response.success?
+  end
+
+  def read_messages(messages, **)
+    # NOTE: Marking the last message as read automatically applies to all previous ones.
+    message = messages.last
+    response = HTTParty.post(
+      "#{phone_id_path('v23.0')}/messages",
+      headers: api_headers,
+      body: {
+        messaging_product: 'whatsapp',
+        message_id: message.source_id,
+        status: 'read'
+      }.to_json
+    )
+
+    Rails.logger.error(response.parsed_response) unless response.success?
+
+    response.success?
+  end
+
+  private
+
+  def csat_template_service
+    @csat_template_service ||= Whatsapp::CsatTemplateService.new(whatsapp_channel)
   end
 
   def api_base_path
@@ -66,8 +130,8 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
   end
 
   # TODO: See if we can unify the API versions and for both paths and make it consistent with out facebook app API versions
-  def phone_id_path
-    "#{api_base_path}/v13.0/#{whatsapp_channel.provider_config['phone_number_id']}"
+  def phone_id_path(version = 'v13.0')
+    "#{api_base_path}/#{version}/#{whatsapp_channel.provider_config['phone_number_id']}"
   end
 
   def business_account_path
@@ -87,19 +151,18 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
       }.to_json
     )
 
-    process_response(response)
+    process_response(response, message)
   end
 
   def send_attachment_message(phone_number, message)
     attachment = message.attachments.first
     type = %w[image audio video].include?(attachment.file_type) ? attachment.file_type : 'document'
-    type_content = {
-      'link': attachment.download_url
-    }
+    type_content = { 'link' => attachment.download_url }
     type_content['caption'] = message.outgoing_content unless %w[audio sticker].include?(type)
     type_content['filename'] = attachment.file.filename if type == 'document'
+    type_content['voice'] = true if voice_message?(type, attachment)
     response = HTTParty.post(
-      "#{phone_id_path}/messages",
+      "#{phone_id_path('v24.0')}/messages",
       headers: api_headers,
       body: {
         :messaging_product => 'whatsapp',
@@ -110,7 +173,11 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
       }.to_json
     )
 
-    process_response(response)
+    process_response(response, message)
+  end
+
+  def voice_message?(type, attachment)
+    type == 'audio' && attachment.meta&.dig('is_recorded_audio') && attachment.file.content_type == 'audio/ogg'
   end
 
   def error_message(response)
@@ -119,17 +186,40 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
   end
 
   def template_body_parameters(template_info)
-    {
+    template_body = {
       name: template_info[:name],
       language: {
         policy: 'deterministic',
         code: template_info[:lang_code]
-      },
-      components: [{
-        type: 'body',
-        parameters: template_info[:parameters]
-      }]
+      }
     }
+
+    # Enhanced template parameters structure
+    # Note: Legacy format support (simple parameter arrays) has been removed
+    # in favor of the enhanced component-based structure that supports
+    # headers, buttons, and authentication templates.
+    #
+    # Expected payload format from frontend:
+    # {
+    #   processed_params: {
+    #     body: { '1': 'John', '2': '123 Main St' },
+    #     header: {
+    #       media_url: 'https://...',
+    #       media_type: 'image',
+    #       media_name: 'filename.pdf' # Optional, for document templates only
+    #     },
+    #     buttons: [{ type: 'url', parameter: 'otp123456' }]
+    #   }
+    # }
+    # This gets transformed into WhatsApp API component format:
+    # [
+    #   { type: 'body', parameters: [...] },
+    #   { type: 'header', parameters: [...] },
+    #   { type: 'button', sub_type: 'url', parameters: [...] }
+    # ]
+    template_body[:components] = template_info[:parameters] || []
+
+    template_body
   end
 
   def whatsapp_reply_context(message)
@@ -155,6 +245,27 @@ class Whatsapp::Providers::WhatsappCloudService < Whatsapp::Providers::BaseServi
       }.to_json
     )
 
-    process_response(response)
+    process_response(response, message)
+  end
+
+  def send_reaction_message(phone_number, message)
+    response = HTTParty.post(
+      "#{phone_id_path('v23.0')}/messages",
+      headers: api_headers,
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: phone_number,
+        type: 'reaction',
+        reaction: {
+          message_id: message.content_attributes[:in_reply_to_external_id],
+          emoji: message.outgoing_content
+        }
+      }.to_json
+    )
+
+    process_response(response, message)
   end
 end
+
+Whatsapp::Providers::WhatsappCloudService.prepend_mod_with('Whatsapp::Providers::WhatsappCloudService')

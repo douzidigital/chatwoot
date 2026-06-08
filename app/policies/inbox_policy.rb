@@ -58,7 +58,27 @@ class InboxPolicy < ApplicationPolicy
     @account_user.administrator?
   end
 
+  def sync_templates?
+    @account_user.administrator?
+  end
+
+  def health?
+    @account_user.administrator?
+  end
+
+  def reset_secret?
+    @account_user.administrator?
+  end
+
   def disconnect_channel_provider?
     @account_user.administrator?
+  end
+
+  def convert_provider?
+    @account_user.administrator?
+  end
+
+  def on_whatsapp?
+    true
   end
 end

@@ -5,23 +5,27 @@ import {
   useFunctionGetter,
   useStore,
 } from 'dashboard/composables/store';
+import { useAccount } from 'dashboard/composables/useAccount';
 import { useUISettings } from 'dashboard/composables/useUISettings';
+import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 
 import AccordionItem from 'dashboard/components/Accordion/AccordionItem.vue';
 import ContactConversations from './ContactConversations.vue';
 import ConversationAction from './ConversationAction.vue';
 import ConversationParticipant from './ConversationParticipant.vue';
 import ContactInfo from './contact/ContactInfo.vue';
+import GroupContactInfo from './contact/GroupContactInfo.vue';
 import ContactNotes from './contact/ContactNotes.vue';
+import ScheduledMessages from './scheduledMessages/ScheduledMessages.vue';
 import ConversationInfo from './ConversationInfo.vue';
 import CustomAttributes from './customAttributes/CustomAttributes.vue';
+import SharedFiles from './SharedFiles.vue';
 import Draggable from 'vuedraggable';
 import MacrosList from './Macros/List.vue';
 import ShopifyOrdersList from 'dashboard/components/widgets/conversation/ShopifyOrdersList.vue';
 import SidebarActionsHeader from 'dashboard/components-next/SidebarActionsHeader.vue';
 import LinearIssuesList from 'dashboard/components/widgets/conversation/linear/IssuesList.vue';
 import LinearSetupCTA from 'dashboard/components/widgets/conversation/linear/LinearSetupCTA.vue';
-import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 
 const props = defineProps({
   conversationId: {
@@ -44,12 +48,6 @@ const {
 const dragging = ref(false);
 const conversationSidebarItems = ref([]);
 
-const currentAccountId = useMapGetter('getCurrentAccountId');
-
-const isFeatureEnabledonAccount = useMapGetter(
-  'accounts/isFeatureEnabledonAccount'
-);
-
 const shopifyIntegration = useFunctionGetter(
   'integrations/getIntegration',
   'shopify'
@@ -59,18 +57,23 @@ const isShopifyFeatureEnabled = computed(
   () => shopifyIntegration.value.enabled
 );
 
+const { isCloudFeatureEnabled } = useAccount();
+
+const isLinearFeatureEnabled = computed(() =>
+  isCloudFeatureEnabled(FEATURE_FLAGS.LINEAR)
+);
+
 const linearIntegration = useFunctionGetter(
   'integrations/getIntegration',
   'linear'
 );
 
-const isLinearIntegrationEnabled = computed(
-  () => linearIntegration.value?.enabled || false
-);
+const isLinearClientIdConfigured = computed(() => {
+  return !!linearIntegration.value?.id;
+});
 
-const isLinearFeatureEnabled = isFeatureEnabledonAccount.value(
-  currentAccountId.value,
-  FEATURE_FLAGS.LINEAR
+const isLinearConnected = computed(
+  () => linearIntegration.value?.enabled || false
 );
 
 const store = useStore();
@@ -87,6 +90,14 @@ const conversationAdditionalAttributes = computed(
 );
 
 const channelType = computed(() => currentChat.value.meta?.channel);
+const isGroupConversation = computed(
+  () => currentChat.value.group_type === 'group'
+);
+const sidebarTitle = computed(() =>
+  isGroupConversation.value
+    ? 'GROUP.SIDEBAR_TITLE'
+    : 'CONVERSATION.SIDEBAR.CONTACT'
+);
 
 const contactGetter = useMapGetter('contacts/getContact');
 const contactId = computed(() => currentChat.value.meta?.sender?.id);
@@ -101,9 +112,16 @@ const getContactDetails = () => {
   }
 };
 
+const triggerGroupSync = () => {
+  if (isGroupConversation.value && contactId.value) {
+    store.dispatch('groupMembers/sync', { contactId: contactId.value });
+  }
+};
+
 watch(contactId, (newContactId, prevContactId) => {
   if (newContactId && newContactId !== prevContactId) {
     getContactDetails();
+    triggerGroupSync();
   }
 });
 
@@ -124,6 +142,7 @@ const closeContactPanel = () => {
 onMounted(() => {
   conversationSidebarItems.value = conversationSidebarItemsOrder.value;
   getContactDetails();
+  triggerGroupSync();
   store.dispatch('attributes/get', 0);
   // Load integrations to ensure linear integration state is available
   store.dispatch('integrations/get', 'linear');
@@ -133,11 +152,12 @@ onMounted(() => {
 <template>
   <div class="w-full">
     <SidebarActionsHeader
-      :title="$t('CONVERSATION.SIDEBAR.CONTACT')"
+      :title="$t(sidebarTitle)"
       @close="closeContactPanel"
     />
-    <ContactInfo :contact="contact" :channel-type="channelType" />
-    <div class="pb-8 list-group px-2">
+    <GroupContactInfo v-if="isGroupConversation" :contact="contact" />
+    <ContactInfo v-else :contact="contact" :channel-type="channelType" />
+    <div class="px-2 pb-8 list-group">
       <Draggable
         :list="conversationSidebarItems"
         animation="200"
@@ -150,7 +170,26 @@ onMounted(() => {
       >
         <template #item="{ element }">
           <div
-            v-if="element.name === 'conversation_actions'"
+            v-if="element.name === 'scheduled_messages'"
+            class="conversation--actions"
+          >
+            <AccordionItem
+              :title="$t('CONVERSATION_SIDEBAR.ACCORDION.SCHEDULED_MESSAGES')"
+              :is-open="isContactSidebarItemOpen('is_scheduled_messages_open')"
+              compact
+              @toggle="
+                value =>
+                  toggleSidebarUIState('is_scheduled_messages_open', value)
+              "
+            >
+              <ScheduledMessages
+                :conversation-id="conversationId"
+                :inbox-id="inboxId"
+              />
+            </AccordionItem>
+          </div>
+          <div
+            v-else-if="element.name === 'conversation_actions'"
             class="conversation--actions"
           >
             <AccordionItem
@@ -252,7 +291,9 @@ onMounted(() => {
           </woot-feature-toggle>
           <div
             v-else-if="
-              element.name === 'linear_issues' && isLinearFeatureEnabled
+              element.name === 'linear_issues' &&
+              isLinearFeatureEnabled &&
+              isLinearClientIdConfigured
             "
           >
             <AccordionItem
@@ -263,7 +304,7 @@ onMounted(() => {
                 value => toggleSidebarUIState('is_linear_issues_open', value)
               "
             >
-              <LinearSetupCTA v-if="!isLinearIntegrationEnabled" />
+              <LinearSetupCTA v-if="!isLinearConnected" />
               <LinearIssuesList v-else :conversation-id="conversationId" />
             </AccordionItem>
           </div>
@@ -295,6 +336,18 @@ onMounted(() => {
               <ContactNotes :contact-id="contactId" />
             </AccordionItem>
           </div>
+          <div v-else-if="element.name === 'shared_files'">
+            <AccordionItem
+              :title="$t('CONVERSATION_SIDEBAR.ACCORDION.SHARED_FILES')"
+              :is-open="isContactSidebarItemOpen('is_shared_files_open')"
+              compact
+              @toggle="
+                value => toggleSidebarUIState('is_shared_files_open', value)
+              "
+            >
+              <SharedFiles />
+            </AccordionItem>
+          </div>
         </template>
       </Draggable>
     </div>
@@ -305,18 +358,6 @@ onMounted(() => {
 ::v-deep {
   .contact--profile {
     @apply pb-3 border-b border-solid border-n-weak;
-  }
-
-  .conversation--actions .multiselect-wrap--small {
-    .multiselect {
-      @apply box-border pl-6;
-    }
-
-    .multiselect__element {
-      span {
-        @apply w-full;
-      }
-    }
   }
 }
 </style>

@@ -16,6 +16,7 @@ class ConversationApi extends ApiClient {
     conversationType,
     sortBy,
     updatedWithin,
+    groupType,
   }) {
     return axios.get(this.url, {
       params: {
@@ -28,6 +29,7 @@ class ConversationApi extends ApiClient {
         conversation_type: conversationType,
         sort_by: sortBy,
         updated_within: updatedWithin,
+        group_type: groupType,
       },
     });
   }
@@ -63,10 +65,9 @@ class ConversationApi extends ApiClient {
   }
 
   assignAgent({ conversationId, agentId }) {
-    return axios.post(
-      `${this.url}/${conversationId}/assignments?assignee_id=${agentId}`,
-      {}
-    );
+    return axios.post(`${this.url}/${conversationId}/assignments`, {
+      assignee_id: agentId,
+    });
   }
 
   assignTeam({ conversationId, teamId }) {
@@ -86,6 +87,16 @@ class ConversationApi extends ApiClient {
     return axios.post(`${this.url}/${conversationId}/toggle_typing_status`, {
       typing_status: status,
       is_private: isPrivate,
+    });
+  }
+
+  presenceSubscribe(conversationId) {
+    return axios.post(`${this.url}/${conversationId}/presence_subscribe`);
+  }
+
+  presenceSubscribeBulk(conversationIds) {
+    return axios.post(`${this.url}/presence_subscribe_bulk`, {
+      conversation_ids: conversationIds,
     });
   }
 

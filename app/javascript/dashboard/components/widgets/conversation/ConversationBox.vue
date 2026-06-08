@@ -39,6 +39,9 @@ export default {
       currentChat: 'getSelectedChat',
       dashboardApps: 'dashboardApps/getRecords',
     }),
+    conversationDashboardApps() {
+      return this.dashboardApps.filter(app => !app.show_on_sidebar);
+    },
     dashboardAppTabs() {
       return [
         {
@@ -46,7 +49,7 @@ export default {
           index: 0,
           name: this.$t('CONVERSATION.DASHBOARD_APP_TAB_MESSAGES'),
         },
-        ...this.dashboardApps.map((dashboardApp, index) => ({
+        ...this.conversationDashboardApps.map((dashboardApp, index) => ({
           key: `dashboard-${dashboardApp.id}`,
           index: index + 1,
           name: dashboardApp.title,
@@ -91,7 +94,7 @@ export default {
 
 <template>
   <div
-    class="conversation-details-wrap flex flex-col min-w-0 w-full bg-n-background relative"
+    class="conversation-details-wrap flex flex-col min-w-0 w-full bg-n-surface-1 relative"
     :class="{
       'border-l rtl:border-l-0 rtl:border-r border-n-weak': !isOnExpandedLayout,
     }"
@@ -100,11 +103,14 @@ export default {
       v-if="currentChat.id"
       :chat="currentChat"
       :show-back-button="isOnExpandedLayout && !isInboxView"
+      :class="{
+        'border-b border-b-n-weak !pt-2': !dashboardApps.length,
+      }"
     />
     <woot-tabs
-      v-if="dashboardApps.length && currentChat.id"
+      v-if="conversationDashboardApps.length && currentChat.id"
       :index="activeIndex"
-      class="-mt-px border-t border-t-n-background"
+      class="h-10"
       @change="onDashboardAppTabChange"
     >
       <woot-tabs-item
@@ -114,7 +120,6 @@ export default {
         :name="tab.name"
         :show-badge="false"
         is-compact
-        class="[&_a]:pt-1"
       />
     </woot-tabs>
     <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
@@ -130,11 +135,11 @@ export default {
       <slot />
     </div>
     <DashboardAppFrame
-      v-for="(dashboardApp, index) in dashboardApps"
+      v-for="(dashboardApp, index) in conversationDashboardApps"
       v-show="activeIndex - 1 === index"
       :key="currentChat.id + '-' + dashboardApp.id"
       :is-visible="activeIndex - 1 === index"
-      :config="dashboardApps[index].content"
+      :config="conversationDashboardApps[index].content"
       :position="index"
       :current-chat="currentChat"
     />

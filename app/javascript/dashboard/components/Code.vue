@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import 'highlight.js/styles/default.css';
 import 'highlight.js/lib/common';
 import NextButton from 'dashboard/components-next/button/Button.vue';
@@ -24,9 +24,19 @@ const props = defineProps({
     type: String,
     default: 'Chatwoot Codepen',
   },
+  secure: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const { t } = useI18n();
+
+const isVisible = ref(false);
+
+const toggleVisibility = () => {
+  isVisible.value = !isVisible.value;
+};
 
 const scrubbedScript = computed(() => {
   // remove trailing and leading extra lines and not spaces
@@ -52,6 +62,10 @@ const codepenScriptValue = computed(() => {
   });
 });
 
+const shouldShowScript = computed(() => {
+  return !props.secure || isVisible.value;
+});
+
 const onCopy = async e => {
   e.preventDefault();
   await copyTextToClipboard(scrubbedScript.value);
@@ -61,7 +75,9 @@ const onCopy = async e => {
 
 <template>
   <div class="relative text-left">
-    <div class="top-1.5 absolute right-1.5 flex items-center gap-1">
+    <div
+      class="top-1.5 absolute ltr:right-1.5 rtl:left-1.5 flex backdrop-blur-sm rounded-lg items-center gap-1"
+    >
       <form
         v-if="enableCodePen"
         class="flex items-center"
@@ -79,6 +95,14 @@ const onCopy = async e => {
         />
       </form>
       <NextButton
+        v-if="secure"
+        slate
+        xs
+        faded
+        :icon="isVisible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+        @click="toggleVisibility"
+      />
+      <NextButton
         slate
         xs
         faded
@@ -86,6 +110,17 @@ const onCopy = async e => {
         @click="onCopy"
       />
     </div>
-    <highlightjs v-if="script" :language="lang" :code="scrubbedScript" />
+    <highlightjs
+      v-if="script && shouldShowScript"
+      :language="lang"
+      :code="scrubbedScript"
+      class="[&_code]:text-start"
+    />
+    <highlightjs
+      v-else-if="script && secure && !isVisible"
+      :language="lang"
+      code="••••••••••••••••••••••••••••••••"
+      class="[&_code]:text-start"
+    />
   </div>
 </template>

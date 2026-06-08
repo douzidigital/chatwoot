@@ -1,5 +1,9 @@
 module Whatsapp::BaileysHandlers::MessagesUpsert
   include Whatsapp::BaileysHandlers::Helpers
+  include Whatsapp::BaileysHandlers::Concerns::GroupContactMessageHandler
+  include Whatsapp::BaileysHandlers::Concerns::IndividualContactMessageHandler
+  include Whatsapp::BaileysHandlers::Concerns::GroupEventHelper
+  include Whatsapp::BaileysHandlers::Concerns::GroupStubMessageHandler
   include BaileysHelper
 
   private
@@ -10,6 +14,8 @@ module Whatsapp::BaileysHandlers::MessagesUpsert
       @message = nil
       @contact_inbox = nil
       @contact = nil
+      @referral = nil
+      @entry_point = nil
       @raw_message = message
 
       next handle_message if incoming?
@@ -20,103 +26,55 @@ module Whatsapp::BaileysHandlers::MessagesUpsert
     end
   end
 
-  def handle_message # rubocop:disable Metrics/CyclomaticComplexity
-    return unless %w[lid user].include?(jid_type)
-    return if jid_type == 'lid' && !phone_number_from_jid
+  def handle_message
+    @lock_acquired = false
+
+    return handle_message_stub if message_stub?
+    return handle_revoke if protocol_revoke?
+
     return if ignore_message?
-    return if find_message_by_source_id(raw_message_id) || message_under_process?
+    return if find_message_by_source_id(raw_message_id)
 
-    cache_message_source_id_in_redis
-    set_contact
+    route_contact_message
+  end
 
-    unless @contact
-      clear_message_source_id_from_redis
+  def route_contact_message
+    return handle_individual_contact_message if %w[lid user].include?(jid_type)
+    return handle_group_contact_message if jid_type == 'group' && Whatsapp::Providers::WhatsappBaileysService.groups_enabled?
+  end
 
-      Rails.logger.warn "Contact not found for message: #{raw_message_id}"
-      return
+  # The contact deleted a message for everyone. Keep the stored content and only
+  # flag it as deleted by the contact so the UI can mark it while staying readable.
+  # NOTE: If the revoke webhook somehow arrives before the original message is
+  # processed, find_message_by_source_id returns nil and the revoke becomes a
+  # no-op; the original is later created without the flag. WhatsApp delivers
+  # webhooks in order so this is rare and accepted; persisting pending revokes
+  # would require updating this flagging logic.
+  def handle_revoke
+    return unless find_message_by_source_id(protocol_revoke_target_id)
+
+    @message.update!(deleted_by_contact: true)
+  end
+
+  def message_stub?
+    @raw_message[:messageStubType].present?
+  end
+
+  def handle_message_stub
+    return unless jid_type == 'group'
+
+    @lock_acquired = acquire_message_processing_lock
+    return unless @lock_acquired
+
+    case @raw_message[:messageStubType]
+    when MEMBERSHIP_REQUEST_STUB
+      handle_membership_request_stub
+    when ICON_CHANGE_STUB
+      handle_icon_change_stub
+    when GROUP_CREATE_STUB
+      handle_group_create_stub
     end
-
-    set_conversation
-    handle_create_message
-    clear_message_source_id_from_redis
-  end
-
-  def set_contact
-    push_name = contact_name
-    source_id = phone_number_from_jid
-    contact_inbox = ::ContactInboxWithContactBuilder.new(
-      # FIXME: update the source_id to complete jid in future
-      source_id: source_id,
-      inbox: inbox,
-      contact_attributes: { name: push_name, phone_number: "+#{source_id}" }
-    ).perform
-
-    @contact_inbox = contact_inbox
-    @contact = contact_inbox.contact
-
-    @contact.update!(name: push_name) if @contact.name == source_id
-  end
-
-  def handle_create_message
-    create_message(attach_media: %w[image file video audio sticker].include?(message_type))
-  end
-
-  def create_message(attach_media: false)
-    @message = @conversation.messages.build(
-      content: message_content,
-      account_id: @inbox.account_id,
-      inbox_id: @inbox.id,
-      source_id: raw_message_id,
-      sender: incoming? ? @contact : @inbox.account.account_users.first.user,
-      sender_type: incoming? ? 'Contact' : 'User',
-      message_type: incoming? ? :incoming : :outgoing,
-      content_attributes: message_content_attributes
-    )
-
-    handle_attach_media if attach_media
-
-    @message.save!
-
-    inbox.channel.received_messages([@message], @conversation) if incoming?
-  end
-
-  def message_content_attributes
-    type = message_type
-    content_attributes = { external_created_at: baileys_extract_message_timestamp(@raw_message[:messageTimestamp]) }
-    if type == 'reaction'
-      content_attributes[:in_reply_to_external_id] = @raw_message.dig(:message, :reactionMessage, :key, :id)
-      content_attributes[:is_reaction] = true
-    elsif type == 'unsupported'
-      content_attributes[:is_unsupported] = true
-    end
-
-    content_attributes
-  end
-
-  def handle_attach_media
-    attachment_file = download_attachment_file
-
-    attachment = @message.attachments.build(
-      account_id: @message.account_id,
-      file_type: file_content_type.to_s,
-      file: { io: attachment_file, filename: filename, content_type: message_mimetype }
-    )
-    attachment.meta = { is_recorded_audio: true } if @raw_message.dig(:message, :audioMessage, :ptt)
-  rescue Down::Error => e
-    @message.update!(is_unsupported: true)
-
-    Rails.logger.error "Failed to download attachment for message #{raw_message_id}: #{e.message}"
-  end
-
-  def download_attachment_file
-    Down.download(@conversation.inbox.channel.media_url(@raw_message.dig(:key, :id)), headers: @conversation.inbox.channel.api_headers)
-  end
-
-  def filename
-    filename = @raw_message.dig(:message, :documentMessage, :fileName)
-    return filename if filename.present?
-
-    ext = ".#{message_mimetype.split(';').first.split('/').last}" if message_mimetype.present?
-    "#{file_content_type}_#{raw_message_id}_#{Time.current.strftime('%Y%m%d')}#{ext}"
+  ensure
+    clear_message_source_id_from_redis if @lock_acquired
   end
 end
