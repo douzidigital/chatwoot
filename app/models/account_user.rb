@@ -2,24 +2,26 @@
 #
 # Table name: account_users
 #
-#  id             :bigint           not null, primary key
-#  active_at      :datetime
-#  auto_offline   :boolean          default(TRUE), not null
-#  availability   :integer          default("online"), not null
-#  role           :integer          default("agent")
-#  created_at     :datetime         not null
-#  updated_at     :datetime         not null
-#  account_id     :bigint
-#  custom_role_id :bigint
-#  inviter_id     :bigint
-#  user_id        :bigint
+#  id                       :bigint           not null, primary key
+#  active_at                :datetime
+#  auto_offline             :boolean          default(TRUE), not null
+#  availability             :integer          default("online"), not null
+#  role                     :integer          default("agent")
+#  created_at               :datetime         not null
+#  updated_at               :datetime         not null
+#  account_id               :bigint
+#  agent_capacity_policy_id :bigint
+#  custom_role_id           :bigint
+#  inviter_id               :bigint
+#  user_id                  :bigint
 #
 # Indexes
 #
-#  index_account_users_on_account_id      (account_id)
-#  index_account_users_on_custom_role_id  (custom_role_id)
-#  index_account_users_on_user_id         (user_id)
-#  uniq_user_id_per_account_id            (account_id,user_id) UNIQUE
+#  index_account_users_on_account_id                (account_id)
+#  index_account_users_on_agent_capacity_policy_id  (agent_capacity_policy_id)
+#  index_account_users_on_custom_role_id            (custom_role_id)
+#  index_account_users_on_user_id                   (user_id)
+#  uniq_user_id_per_account_id                      (account_id,user_id) UNIQUE
 #
 
 class AccountUser < ApplicationRecord
@@ -34,7 +36,7 @@ class AccountUser < ApplicationRecord
 
   accepts_nested_attributes_for :account
 
-  after_create_commit :notify_creation, :create_notification_setting
+  after_create_commit :notify_creation, :create_notification_setting, :add_to_public_internal_chat_channels
   after_destroy :notify_deletion, :remove_user_from_account
   after_save :update_presence_in_redis, if: :saved_change_to_availability?
 
@@ -42,7 +44,7 @@ class AccountUser < ApplicationRecord
 
   def create_notification_setting
     setting = user.notification_settings.new(account_id: account.id)
-    setting.selected_email_flags = [:email_conversation_assignment]
+    setting.selected_email_flags = []
     setting.selected_push_flags = [:push_conversation_assignment]
     setting.save!
   end
@@ -76,6 +78,14 @@ class AccountUser < ApplicationRecord
 
   def update_presence_in_redis
     OnlineStatusTracker.set_status(account.id, user.id, availability)
+  end
+
+  def add_to_public_internal_chat_channels
+    account.internal_chat_channels.where(channel_type: :public_channel).find_each do |channel|
+      channel.channel_members.find_or_create_by!(user_id: user_id) do |m|
+        m.role = administrator? ? :admin : :member
+      end
+    end
   end
 end
 

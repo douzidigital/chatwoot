@@ -9,7 +9,10 @@ import { useConversationFilterContext } from './provider.js';
 import { useSnakeCase } from 'dashboard/composables/useTransformKeys';
 
 import Button from 'next/button/Button.vue';
+import Input from 'dashboard/components-next/input/Input.vue';
 import ConditionRow from './ConditionRow.vue';
+import VisibilitySelector from './VisibilitySelector.vue';
+import { useMapGetter } from 'dashboard/composables/store';
 
 const props = defineProps({
   isFolderView: {
@@ -19,6 +22,10 @@ const props = defineProps({
   folderName: {
     type: String,
     default: '',
+  },
+  folderVisibility: {
+    type: String,
+    default: 'personal',
   },
 });
 
@@ -30,6 +37,9 @@ const filters = defineModel({
   default: [],
 });
 const folderNameLocal = ref(props.folderName);
+const folderVisibilityLocal = ref(props.folderVisibility);
+const currentRole = useMapGetter('getCurrentRole');
+const isAdmin = computed(() => currentRole.value === 'administrator');
 
 const DEFAULT_FILTER = {
   attributeKey: 'status',
@@ -65,7 +75,12 @@ const isConditionsValid = () => {
 
 const updateSavedCustomViews = () => {
   if (isConditionsValid()) {
-    emit('updateFolder', filters.value, folderNameLocal.value);
+    emit(
+      'updateFolder',
+      filters.value,
+      folderNameLocal.value,
+      folderVisibilityLocal.value
+    );
   }
 };
 
@@ -110,16 +125,18 @@ const outsideClickHandler = [
       {{ filterModalHeaderTitle }}
     </h3>
     <div v-if="props.isFolderView">
-      <label class="border-b border-n-weak pb-6">
-        <div class="text-n-slate-11 text-sm mb-2">
-          {{ t('FILTER.FOLDER_LABEL') }}
-        </div>
-        <input
+      <div class="border-b border-n-weak pb-6 grid gap-4">
+        <Input
           v-model="folderNameLocal"
-          class="py-1.5 px-3 text-n-slate-12 bg-n-alpha-1 text-sm rounded-lg reset-base w-full"
+          :label="t('FILTER.FOLDER_LABEL')"
           :placeholder="t('FILTER.INPUT_PLACEHOLDER')"
         />
-      </label>
+        <VisibilitySelector
+          v-if="isAdmin"
+          v-model="folderVisibilityLocal"
+          i18n-prefix="FILTER.CUSTOM_VIEWS.VISIBILITY"
+        />
+      </div>
     </div>
     <ul class="grid gap-4 list-none">
       <template v-for="(filter, index) in filters" :key="filter.id">

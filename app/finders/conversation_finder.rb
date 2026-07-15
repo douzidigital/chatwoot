@@ -1,4 +1,4 @@
-class ConversationFinder
+class ConversationFinder # rubocop:disable Metrics/ClassLength
   attr_reader :current_user, :current_account, :params
 
   DEFAULT_STATUS = 'open'.freeze
@@ -11,6 +11,8 @@ class ConversationFinder
     'priority_desc' => %w[sort_on_priority desc],
     'waiting_since_asc' => %w[sort_on_waiting_since asc],
     'waiting_since_desc' => %w[sort_on_waiting_since desc],
+    'priority_desc_created_at_asc' => %w[sort_on_priority_created_at desc],
+    'unread' => %w[sort_on_unread desc],
 
     # To be removed in v3.5.0
     'latest' => %w[sort_on_last_activity_at desc],
@@ -39,13 +41,29 @@ class ConversationFinder
   def perform
     set_up
 
-    mine_count, unassigned_count, all_count, = set_count_for_all_conversations
+    mine_count, unassigned_count, all_count = set_count_for_all_conversations
     assigned_count = all_count - unassigned_count
 
     filter_by_assignee_type
 
     {
       conversations: conversations,
+      count: {
+        mine_count: mine_count,
+        assigned_count: assigned_count,
+        unassigned_count: unassigned_count,
+        all_count: all_count
+      }
+    }
+  end
+
+  def perform_meta_only
+    set_up
+
+    mine_count, unassigned_count, all_count, = set_count_for_all_conversations
+    assigned_count = all_count - unassigned_count
+
+    {
       count: {
         mine_count: mine_count,
         assigned_count: assigned_count,
@@ -64,6 +82,7 @@ class ConversationFinder
 
     find_all_conversations
     filter_by_status unless params[:q]
+    filter_by_group_type
     filter_by_team
     filter_by_labels
     filter_by_query
@@ -118,6 +137,12 @@ class ConversationFinder
     @conversations
   end
 
+  def filter_by_group_type
+    return unless params[:group_type].present? && params[:group_type] != 'all'
+
+    @conversations = @conversations.where(group_type: params[:group_type])
+  end
+
   def filter_by_conversation_type
     case @params[:conversation_type]
     when 'mention'
@@ -167,6 +192,17 @@ class ConversationFinder
   end
 
   def set_count_for_all_conversations
+    return legacy_count_for_all_conversations if @conversations.limit_value || @conversations.offset_value || @conversations.eager_loading?
+
+    counts = @conversations.unscope(:order).pick(
+      Arel.sql("COUNT(*) FILTER (WHERE assignee_id = #{current_user.id})"),
+      Arel.sql('COUNT(*) FILTER (WHERE assignee_id IS NULL)'),
+      Arel.sql('COUNT(*)')
+    )
+    counts || [0, 0, 0]
+  end
+
+  def legacy_count_for_all_conversations
     [
       @conversations.assigned_to(current_user).count,
       @conversations.unassigned.count,

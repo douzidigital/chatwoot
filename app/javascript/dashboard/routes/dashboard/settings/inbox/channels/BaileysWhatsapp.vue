@@ -1,95 +1,134 @@
-<script>
-import { mapGetters } from 'vuex';
+<script setup>
+import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useStore } from 'vuex';
+import { useI18n } from 'vue-i18n';
 import { useVuelidate } from '@vuelidate/core';
 import { useAlert } from 'dashboard/composables';
 import { required, requiredIf } from '@vuelidate/validators';
-import router from '../../../../index';
 import { isPhoneE164OrEmpty } from 'shared/helpers/Validators';
 import { isValidURL } from '../../../../../helper/URLHelper';
 
 import NextButton from 'dashboard/components-next/button/Button.vue';
 import Switch from 'dashboard/components-next/switch/Switch.vue';
 
-export default {
-  components: {
-    NextButton,
-    // eslint-disable-next-line vue/no-reserved-component-names
-    Switch,
+const props = defineProps({
+  mode: {
+    type: String,
+    default: 'create',
+    validator: value => ['create', 'convert'].includes(value),
   },
-  setup() {
-    return { v$: useVuelidate() };
+  inbox: {
+    type: Object,
+    default: null,
   },
-  data() {
-    return {
-      inboxName: '',
-      phoneNumber: '',
-      apiKey: '',
-      providerUrl: '',
-      showAdvancedOptions: false,
-      markAsRead: true,
-    };
+});
+
+const isConvertMode = computed(() => props.mode === 'convert');
+
+const router = useRouter();
+const store = useStore();
+const { t } = useI18n();
+
+const inboxName = ref(isConvertMode.value ? props.inbox?.name || '' : '');
+const phoneNumber = ref(
+  isConvertMode.value ? props.inbox?.phone_number || '' : ''
+);
+const apiKey = ref('');
+const providerUrl = ref('');
+const showAdvancedOptions = ref(false);
+const markAsRead = ref(true);
+const presenceSubscribe = ref(false);
+
+const uiFlags = computed(() => store.getters['inboxes/getUIFlags']);
+
+const rules = computed(() => ({
+  inboxName: { required },
+  phoneNumber: { required, isPhoneE164OrEmpty },
+  providerUrl: {
+    isValidURL: value => !value || isValidURL(value),
+    requiredIf: requiredIf(apiKey),
   },
-  computed: {
-    ...mapGetters({ uiFlags: 'inboxes/getUIFlags' }),
-  },
-  validations() {
-    return {
-      inboxName: { required },
-      phoneNumber: { required, isPhoneE164OrEmpty },
-      providerUrl: {
-        isValidURL: value => !value || isValidURL(value),
-        requiredIf: requiredIf(this.apiKey),
+  apiKey: { requiredIf: requiredIf(providerUrl) },
+}));
+
+const v$ = useVuelidate(rules, {
+  inboxName,
+  phoneNumber,
+  providerUrl,
+  apiKey,
+});
+
+const buildProviderConfig = () => {
+  const providerConfig = {
+    mark_as_read: markAsRead.value,
+    presence_subscribe: presenceSubscribe.value,
+  };
+
+  if (apiKey.value || providerUrl.value) {
+    providerConfig.api_key = apiKey.value;
+    providerConfig.provider_url = providerUrl.value;
+  }
+
+  return providerConfig;
+};
+
+const createChannel = async () => {
+  v$.value.$touch();
+  if (v$.value.$invalid) {
+    return;
+  }
+
+  try {
+    if (isConvertMode.value) {
+      await store.dispatch('inboxes/convertProvider', {
+        inboxId: props.inbox.id,
+        provider: 'baileys',
+        providerConfig: buildProviderConfig(),
+      });
+
+      useAlert(t('INBOX_MGMT.CONVERT.API.SUCCESS_MESSAGE'));
+      router.replace({
+        name: 'settings_inbox_show',
+        params: {
+          accountId: router.currentRoute.value.params.accountId,
+          inboxId: props.inbox.id,
+        },
+      });
+      return;
+    }
+
+    const whatsappChannel = await store.dispatch('inboxes/createChannel', {
+      name: inboxName.value,
+      channel: {
+        type: 'whatsapp',
+        phone_number: phoneNumber.value,
+        provider: 'baileys',
+        provider_config: buildProviderConfig(),
       },
-      apiKey: { requiredIf: requiredIf(this.providerUrl) },
-    };
-  },
-  methods: {
-    async createChannel() {
-      this.v$.$touch();
-      if (this.v$.$invalid) {
-        return;
-      }
+    });
 
-      try {
-        const providerConfig = {
-          mark_as_read: this.markAsRead,
-        };
+    router.replace({
+      name: 'settings_inboxes_add_agents',
+      params: {
+        page: 'new',
+        inbox_id: whatsappChannel.id,
+      },
+    });
+  } catch (error) {
+    useAlert(
+      error.message ||
+        t(
+          isConvertMode.value
+            ? 'INBOX_MGMT.CONVERT.API.ERROR_MESSAGE'
+            : 'INBOX_MGMT.ADD.WHATSAPP.API.ERROR_MESSAGE'
+        )
+    );
+  }
+};
 
-        if (this.apiKey || this.providerUrl) {
-          providerConfig.api_key = this.apiKey;
-          providerConfig.url = this.providerUrl;
-        }
-
-        const whatsappChannel = await this.$store.dispatch(
-          'inboxes/createChannel',
-          {
-            name: this.inboxName,
-            channel: {
-              type: 'whatsapp',
-              phone_number: this.phoneNumber,
-              provider: 'baileys',
-              provider_config: providerConfig,
-            },
-          }
-        );
-
-        router.replace({
-          name: 'settings_inboxes_add_agents',
-          params: {
-            page: 'new',
-            inbox_id: whatsappChannel.id,
-          },
-        });
-      } catch (error) {
-        useAlert(
-          error.message || this.$t('INBOX_MGMT.ADD.WHATSAPP.API.ERROR_MESSAGE')
-        );
-      }
-    },
-    setShowAdvancedOptions() {
-      this.showAdvancedOptions = true;
-    },
-  },
+const setShowAdvancedOptions = () => {
+  showAdvancedOptions.value = true;
 };
 </script>
 
@@ -101,6 +140,7 @@ export default {
         <input
           v-model="inboxName"
           type="text"
+          :disabled="isConvertMode"
           :placeholder="$t('INBOX_MGMT.ADD.WHATSAPP.INBOX_NAME.PLACEHOLDER')"
           @blur="v$.inboxName.$touch"
         />
@@ -116,6 +156,7 @@ export default {
         <input
           v-model="phoneNumber"
           type="text"
+          :disabled="isConvertMode"
           :placeholder="$t('INBOX_MGMT.ADD.WHATSAPP.PHONE_NUMBER.PLACEHOLDER')"
           @blur="v$.phoneNumber.$touch"
         />
@@ -177,15 +218,30 @@ export default {
           </div>
         </label>
       </div>
+
+      <div class="w-[65%] flex-shrink-0 flex-grow-0 max-w-[65%]">
+        <label>
+          <div class="flex mb-2 items-center">
+            <span class="mr-2 text-sm">
+              {{ $t('INBOX_MGMT.ADD.WHATSAPP.PRESENCE_SUBSCRIBE.LABEL') }}
+            </span>
+            <Switch id="presenceSubscribe" v-model="presenceSubscribe" />
+          </div>
+        </label>
+      </div>
     </template>
 
     <div class="w-full">
       <NextButton
-        :is-loading="uiFlags.isCreating"
+        :is-loading="uiFlags.isCreating || uiFlags.isUpdating"
         type="submit"
         solid
         blue
-        :label="$t('INBOX_MGMT.ADD.WHATSAPP.SUBMIT_BUTTON')"
+        :label="
+          isConvertMode
+            ? $t('INBOX_MGMT.CONVERT.SUBMIT_BUTTON')
+            : $t('INBOX_MGMT.ADD.WHATSAPP.SUBMIT_BUTTON')
+        "
       />
     </div>
   </form>

@@ -49,6 +49,18 @@ RSpec.describe Macros::ExecutionService, type: :service do
     end
   end
 
+  describe '#assign_team' do
+    let(:team) { create(:team, account: account, allow_auto_assign: false) }
+
+    context 'when team_id is nil' do
+      it 'unassigns the team from the conversation' do
+        conversation.update!(team_id: team.id)
+        service.send(:assign_team, ['nil'])
+        expect(conversation.reload.team).to be_nil
+      end
+    end
+  end
+
   describe '#assign_agent' do
     context 'when agent_ids contains self' do
       it 'updates the conversation assignee to the current user' do
@@ -67,6 +79,14 @@ RSpec.describe Macros::ExecutionService, type: :service do
       it 'calls the super method' do
         service.send(:assign_agent, [other_user.id])
         expect(conversation.reload.assignee).to eq(other_user)
+      end
+    end
+
+    context 'when agent_ids contains nil' do
+      it 'unassigns the conversation' do
+        conversation.update!(assignee: user)
+        service.send(:assign_agent, ['nil'])
+        expect(conversation.reload.assignee).to be_nil
       end
     end
   end
@@ -152,6 +172,17 @@ RSpec.describe Macros::ExecutionService, type: :service do
   describe '#send_webhook_event' do
     it 'sends a webhook event' do
       expect(WebhookJob).to receive(:perform_later)
+      service.send(:send_webhook_event, ['https://example.com/webhook'])
+    end
+
+    it 'includes the macro and the executing user in the payload' do
+      expect(WebhookJob).to receive(:perform_later) do |url, payload|
+        expect(url).to eq('https://example.com/webhook')
+        expect(payload[:event]).to eq('macro.executed')
+        expect(payload[:macro]).to eq({ id: macro.id, name: macro.name })
+        expect(payload[:executed_by]).to eq(user.webhook_data)
+      end
+
       service.send(:send_webhook_event, ['https://example.com/webhook'])
     end
   end

@@ -8,11 +8,11 @@ export const buildCreatePayload = ({
   contentAttributes,
   echoId,
   files,
-  isRecordedAudio,
   ccEmails = '',
   bccEmails = '',
   toEmails = '',
   templateParams,
+  isVoiceMessage = false,
 }) => {
   let payload;
   if (files && files.length !== 0) {
@@ -22,9 +22,6 @@ export const buildCreatePayload = ({
     }
     files.forEach(file => {
       payload.append('attachments[]', file);
-    });
-    isRecordedAudio?.forEach(filename => {
-      payload.append('is_recorded_audio[]', filename);
     });
     payload.append('private', isPrivate);
     payload.append('echo_id', echoId);
@@ -36,6 +33,9 @@ export const buildCreatePayload = ({
     }
     if (contentAttributes) {
       payload.append('content_attributes', JSON.stringify(contentAttributes));
+    }
+    if (isVoiceMessage) {
+      payload.append('is_voice_message', true);
     }
   } else {
     payload = {
@@ -64,11 +64,11 @@ class MessageApi extends ApiClient {
     contentAttributes,
     echo_id: echoId,
     files,
-    isRecordedAudio,
     ccEmails = '',
     bccEmails = '',
     toEmails = '',
     templateParams,
+    isVoiceMessage = false,
   }) {
     return axios({
       method: 'post',
@@ -79,17 +79,24 @@ class MessageApi extends ApiClient {
         contentAttributes,
         echoId,
         files,
-        isRecordedAudio,
         ccEmails,
         bccEmails,
         toEmails,
         templateParams,
+        isVoiceMessage,
       }),
     });
   }
 
   delete(conversationID, messageId) {
     return axios.delete(`${this.url}/${conversationID}/messages/${messageId}`);
+  }
+
+  editContent(conversationID, messageId, content) {
+    return axios.patch(
+      `${this.url}/${conversationID}/messages/${messageId}/edit_content`,
+      { content }
+    );
   }
 
   retry(conversationID, messageId) {
@@ -112,6 +119,13 @@ class MessageApi extends ApiClient {
       {
         target_language: targetLanguage,
       }
+    );
+  }
+
+  toggleReaction(conversationId, messageId, emoji, echoId) {
+    return axios.post(
+      `${this.url}/${conversationId}/messages/${messageId}/reactions`,
+      { emoji, echo_id: echoId }
     );
   }
 }

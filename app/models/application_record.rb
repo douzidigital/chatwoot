@@ -1,4 +1,7 @@
 class ApplicationRecord < ActiveRecord::Base
+  MAX_STRING_COLUMN_LENGTH = 255
+  MAX_TEXT_COLUMN_LENGTH = 20_000
+
   include Events::Types
   self.abstract_class = true
 
@@ -10,10 +13,12 @@ class ApplicationRecord < ActiveRecord::Base
   end
 
   # ModelDrop class should exist in app/drops
+  # Walks the STI hierarchy so subclasses (e.g. SuperAdmin < User) resolve to the matching Drop
   def to_drop
-    return unless droppables.include?(self.class.name)
+    drop_class = self.class.ancestors.find { |k| k.is_a?(Class) && droppables.include?(k.name) }
+    return unless drop_class
 
-    "#{self.class.name}Drop".constantize.new(self)
+    "#{drop_class.name}Drop".constantize.new(self)
   end
 
   private
@@ -37,7 +42,7 @@ class ApplicationRecord < ActiveRecord::Base
   end
 
   def validate_content_length(column)
-    max_length = column.type == :text ? 20_000 : 255
+    max_length = column.type == :text ? MAX_TEXT_COLUMN_LENGTH : MAX_STRING_COLUMN_LENGTH
     return if self[column.name].nil? || self[column.name].length <= max_length
 
     errors.add(column.name.to_sym, "is too long (maximum is #{max_length} characters)")

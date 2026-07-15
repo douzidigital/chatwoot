@@ -8,13 +8,20 @@ json.page_title portal.page_title
 json.slug portal.slug
 json.archived portal.archived
 json.account_id portal.account_id
+json.custom_head_html portal.custom_head_html
+json.custom_body_html portal.custom_body_html
 
 json.config do
   json.allowed_locales do
-    json.array! portal.config['allowed_locales'].each do |locale|
+    json.array! portal.allowed_locale_codes.each do |locale|
       json.partial! 'api/v1/models/portal_config', formats: [:json], locale: locale, portal: portal
     end
   end
+  json.show_author portal.show_author?
+  json.default_locale portal.default_locale
+  json.layout portal.layout
+  json.social_profiles portal.social_profiles
+  json.locale_translations portal.config['locale_translations'] || {}
 end
 
 if portal.channel_web_widget
@@ -33,4 +40,11 @@ json.meta do
   json.mine_articles_count articles.search_by_author(current_user.id).try(:size) if current_user.present? && articles.any?
   json.categories_count portal.categories.try(:size)
   json.default_locale portal.default_locale
+end
+
+if portal.ssl_settings.present?
+  json.ssl_settings do
+    json.status portal.ssl_settings['cf_status']
+    json.verification_errors portal.ssl_settings['cf_verification_errors']
+  end
 end

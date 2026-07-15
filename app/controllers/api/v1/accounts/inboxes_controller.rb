@@ -1,13 +1,19 @@
-class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   include Api::V1::InboxesHelper
   before_action :fetch_inbox, except: [:index, :create]
   before_action :fetch_agent_bot, only: [:set_agent_bot]
   before_action :validate_limit, only: [:create]
   # we are already handling the authorization in fetch inbox
-  before_action :check_authorization, except: [:show, :setup_channel_provider]
+  # rubocop:disable Rails/LexicallyScopedActionFilter -- health is defined in WhatsappHealthManagement concern
+  before_action :check_authorization, except: [:show, :health, :setup_channel_provider, :import_whatsapp_session]
+  before_action :validate_whatsapp_cloud_channel, only: [:health]
+  # rubocop:enable Rails/LexicallyScopedActionFilter
+  include Api::V1::Accounts::Concerns::WhatsappHealthManagement
 
   def index
-    @inboxes = policy_scope(Current.account.inboxes.order_by_name.includes(:channel, { avatar_attachment: [:blob] }))
+    @inboxes = policy_scope(Current.account.inboxes)
+               .includes(:channel, :portal, :working_hours, { avatar_attachment: :blob })
+               .order_by_name
   end
 
   def show; end
@@ -64,6 +70,12 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
     head :ok
   end
 
+  def reset_secret
+    return head :not_found unless @inbox.api?
+
+    @inbox.channel.reset_secret!
+  end
+
   def setup_channel_provider
     channel = @inbox.channel
 
@@ -73,6 +85,30 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
 
     channel.setup_channel_provider
     head :ok
+  end
+
+  # Hot-loads a WhatsApp Web session extracted by the browser extension into a
+  # disconnected Baileys inbox. Authorized like setup_channel_provider (any agent
+  # assigned to the inbox, via fetch_inbox -> show?), since connecting a number
+  # to an assigned inbox is the same privilege as scanning a QR for it.
+  def import_whatsapp_session
+    channel = @inbox.channel
+
+    unless channel.is_a?(Channel::Whatsapp) && channel.provider == 'baileys'
+      render json: { error: 'Session import is only supported for Baileys WhatsApp channels' },
+             status: :unprocessable_entity and return
+    end
+
+    session = import_session_params[:session].to_h
+    render json: { error: 'Session payload is required' }, status: :unprocessable_entity and return if session.blank?
+
+    channel.import_session(
+      session: session,
+      candidate_index: import_session_params[:candidate_index].to_i
+    )
+    head :ok
+  rescue Whatsapp::Providers::WhatsappBaileysService::ProviderUnavailableError
+    render json: { error: 'WhatsApp provider is currently unavailable. Please try again.' }, status: :service_unavailable
   end
 
   def disconnect_channel_provider
@@ -88,9 +124,45 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
     channel.update_provider_connection!(connection: 'close') if channel.respond_to?(:update_provider_connection!)
   end
 
+  def convert_provider
+    channel = @inbox.channel
+
+    unless channel.respond_to?(:convert_provider!)
+      render json: { error: 'Channel does not support provider conversion' }, status: :unprocessable_entity and return
+    end
+
+    new_provider = params.require(:provider)
+    new_provider_config = (params.permit(provider_config: {})[:provider_config] || {}).to_h
+
+    channel.convert_provider!(new_provider: new_provider, new_provider_config: new_provider_config)
+    render :show
+  rescue ActionController::ParameterMissing => e
+    render json: { message: e.message }, status: :bad_request
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { message: e.record.errors.full_messages.join(', ') }, status: :unprocessable_entity
+  rescue StandardError => e
+    Rails.logger.error "[WHATSAPP] Provider conversion failed for inbox #{@inbox.id}: #{e.class}: #{e.message}"
+    render json: { message: 'Provider conversion failed. Please check your credentials and the previous provider session, then try again.' },
+           status: :unprocessable_entity
+  end
+
   def destroy
     ::DeleteObjectJob.perform_later(@inbox, Current.user, request.ip) if @inbox.present?
     render status: :ok, json: { message: I18n.t('messages.inbox_deletetion_response') }
+  end
+
+  def on_whatsapp
+    params.require(:phone_number)
+    phone_number = params[:phone_number]
+    channel = @inbox.channel
+
+    unless channel.respond_to?(:on_whatsapp)
+      render json: { error: 'Channel does not support whatsapp check' }, status: :unprocessable_entity and return
+    end
+
+    response = channel.on_whatsapp(phone_number)
+
+    render json: response, status: :ok
   end
 
   private
@@ -100,8 +172,25 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
     authorize @inbox, :show?
   end
 
+  # The session is opaque credentials forwarded verbatim to the Baileys API,
+  # which validates its schema. We still permit an explicit shape (rather than
+  # permit!) so nothing unexpected is forwarded. camelCase keys match the
+  # extractor's output.
+  def import_session_params
+    params.permit(
+      :candidate_index,
+      session: [
+        :registrationId, :advSecretKey, :id, :lid, :platform, :pushName, :routingInfo,
+        { noiseCandidates: %i[private public] },
+        { identityKey: %i[private public] },
+        { account: %i[details accountSignatureKey accountSignature deviceSignature] },
+        { signedPreKey: %i[keyId private public signature] }
+      ]
+    )
+  end
+
   def fetch_agent_bot
-    @agent_bot = AgentBot.find(params[:agent_bot]) if params[:agent_bot]
+    @agent_bot = AgentBot.accessible_to(Current.account).find(params[:agent_bot]) if params[:agent_bot]
   end
 
   def create_channel
@@ -152,31 +241,38 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
   end
 
   def format_csat_config(config)
-    {
-      display_type: config['display_type'] || 'emoji',
-      message: config['message'] || '',
-      survey_rules: {
-        operator: config.dig('survey_rules', 'operator') || 'contains',
-        values: config.dig('survey_rules', 'values') || []
-      }
+    formatted = {
+      'display_type' => config['display_type'] || 'emoji',
+      'message' => config['message'] || '',
+      :survey_rules => {
+        'operator' => config.dig('survey_rules', 'operator') || 'contains',
+        'values' => config.dig('survey_rules', 'values') || []
+      },
+      'button_text' => config['button_text'] || 'Please rate us',
+      'language' => config['language'] || 'en'
     }
+    format_template_config(config, formatted)
+    formatted
+  end
+
+  def format_template_config(config, formatted)
+    formatted['template'] = config['template'] if config['template'].present?
   end
 
   def inbox_attributes
     [:name, :avatar, :greeting_enabled, :greeting_message, :enable_email_collect, :csat_survey_enabled,
      :enable_auto_assignment, :working_hours_enabled, :out_of_office_message, :timezone, :allow_messages_after_resolved,
      :lock_to_single_conversation, :portal_id, :sender_name_type, :business_name,
-     { csat_config: [:display_type, :message, { survey_rules: [:operator, { values: [] }] }] }]
+     { csat_config: [:display_type, :message, :button_text, :language,
+                     { survey_rules: [:operator, { values: [] }],
+                       template: [:name, :template_id, :friendly_name, :content_sid, :approval_sid,
+                                  :created_at, :linked_at, :language, :source, :status, { body_variables: {} }] }] }]
   end
 
   def permitted_params(channel_attributes = [])
     # We will remove this line after fixing https://linear.app/chatwoot/issue/CW-1567/null-value-passed-as-null-string-to-backend
     params.each { |k, v| params[k] = params[k] == 'null' ? nil : v }
-
-    params.permit(
-      *inbox_attributes,
-      channel: [:type, *channel_attributes]
-    )
+    params.permit(*inbox_attributes, channel: [:type, *channel_attributes])
   end
 
   def channel_type_from_params
@@ -192,11 +288,7 @@ class Api::V1::Accounts::InboxesController < Api::V1::Accounts::BaseController
   end
 
   def get_channel_attributes(channel_type)
-    if channel_type.constantize.const_defined?(:EDITABLE_ATTRS)
-      channel_type.constantize::EDITABLE_ATTRS.presence
-    else
-      []
-    end
+    channel_type.constantize.const_defined?(:EDITABLE_ATTRS) ? channel_type.constantize::EDITABLE_ATTRS.presence : []
   end
 end
 

@@ -1,8 +1,8 @@
 <script setup>
-import { defineProps } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import Icon from 'dashboard/components-next/icon/Icon.vue';
+import EmojiIcon from 'dashboard/components-next/emoji-icon-picker/EmojiIcon.vue';
 
 defineProps({
   items: {
@@ -21,9 +21,17 @@ const onClick = (item, index) => {
 </script>
 
 <template>
-  <nav :aria-label="t('BREADCRUMB.ARIA_LABEL')" class="flex items-center h-8">
-    <ol class="flex items-center mb-0">
-      <li v-for="(item, index) in items" :key="index" class="flex items-center">
+  <nav
+    :aria-label="t('BREADCRUMB.ARIA_LABEL')"
+    class="flex items-center h-8 min-w-0"
+  >
+    <ol class="flex items-center mb-0 min-w-0">
+      <li
+        v-for="(item, index) in items"
+        :key="index"
+        class="flex items-center"
+        :class="{ 'min-w-0 flex-1': index === items.length - 1 }"
+      >
         <Icon
           v-if="index > 0"
           icon="i-lucide-chevron-right"
@@ -40,8 +48,17 @@ const onClick = (item, index) => {
         </button>
 
         <!-- The last breadcrumb item is plain text -->
-        <span v-else class="text-sm truncate text-n-slate-12 max-w-56">
-          {{ item.emoji ? item.emoji : '' }} {{ item.label }}
+        <span
+          v-else
+          class="inline-flex items-center gap-1 text-sm truncate min-w-0"
+        >
+          <EmojiIcon
+            v-if="item.emoji"
+            :value="item.emoji"
+            :color="item.iconColor"
+            class="flex-shrink-0 size-4"
+          />
+          <span class="truncate text-n-slate-12">{{ item.label }}</span>
         </span>
       </li>
     </ol>

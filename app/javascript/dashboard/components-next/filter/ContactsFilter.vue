@@ -9,11 +9,15 @@ import { useContactFilterContext } from './contactProvider.js';
 import { useSnakeCase } from 'dashboard/composables/useTransformKeys';
 
 import Button from 'next/button/Button.vue';
+import Input from 'dashboard/components-next/input/Input.vue';
 import ConditionRow from './ConditionRow.vue';
+import VisibilitySelector from './VisibilitySelector.vue';
+import { useMapGetter } from 'dashboard/composables/store';
 
 const props = defineProps({
   isSegmentView: { type: Boolean, default: false },
   segmentName: { type: String, default: '' },
+  segmentVisibility: { type: String, default: 'personal' },
 });
 
 const emit = defineEmits([
@@ -29,6 +33,9 @@ const filters = defineModel({
   default: [],
 });
 const segmentNameLocal = ref(props.segmentName);
+const segmentVisibilityLocal = ref(props.segmentVisibility);
+const currentRole = useMapGetter('getCurrentRole');
+const isAdmin = computed(() => currentRole.value === 'administrator');
 
 const DEFAULT_FILTER = {
   attributeKey: 'name',
@@ -66,7 +73,12 @@ const isConditionsValid = () => {
 
 const updateSavedSegment = () => {
   if (isConditionsValid()) {
-    emit('updateSegment', filters.value, segmentNameLocal.value);
+    emit(
+      'updateSegment',
+      filters.value,
+      segmentNameLocal.value,
+      segmentVisibilityLocal.value
+    );
   }
 };
 
@@ -103,22 +115,24 @@ const outsideClickHandler = [
 <template>
   <div
     v-on-click-outside="outsideClickHandler"
-    class="z-40 max-w-3xl lg:w-[750px] overflow-visible w-full border border-n-weak bg-n-alpha-3 backdrop-blur-[100px] shadow-lg rounded-xl p-6 grid gap-6"
+    class="z-40 max-w-3xl min-w-96 lg:w-[750px] overflow-visible w-full border border-n-weak bg-n-alpha-3 backdrop-blur-[100px] shadow-lg rounded-xl p-6 grid gap-6"
   >
     <h3 class="text-base font-medium leading-6 text-n-slate-12">
       {{ filterModalHeaderTitle }}
     </h3>
     <div v-if="props.isSegmentView">
-      <label class="pb-6 border-b border-n-weak">
-        <div class="mb-2 text-sm text-n-slate-11">
-          {{ $t('CONTACTS_LAYOUT.FILTER.SEGMENT.LABEL') }}
-        </div>
-        <input
+      <div class="pb-6 border-b border-n-weak grid gap-4">
+        <Input
           v-model="segmentNameLocal"
-          class="py-1.5 px-3 text-n-slate-12 bg-n-alpha-1 text-sm rounded-lg reset-base w-full"
+          :label="$t('CONTACTS_LAYOUT.FILTER.SEGMENT.LABEL')"
           :placeholder="t('CONTACTS_LAYOUT.FILTER.SEGMENT.INPUT_PLACEHOLDER')"
         />
-      </label>
+        <VisibilitySelector
+          v-if="isAdmin"
+          v-model="segmentVisibilityLocal"
+          i18n-prefix="CONTACTS_LAYOUT.HEADER.ACTIONS.FILTERS.CREATE_SEGMENT.VISIBILITY"
+        />
+      </div>
     </div>
     <ul class="grid gap-4 list-none">
       <template v-for="(filter, index) in filters" :key="filter.id">
@@ -148,10 +162,10 @@ const outsideClickHandler = [
       </template>
     </ul>
     <div class="flex justify-between gap-2">
-      <Button sm ghost blue @click="addFilter">
+      <Button sm ghost blue class="flex-shrink-0" @click="addFilter">
         {{ $t('CONTACTS_LAYOUT.FILTER.BUTTONS.ADD_FILTER') }}
       </Button>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-shrink-0">
         <Button sm faded slate @click="resetFilter">
           {{ $t('CONTACTS_LAYOUT.FILTER.BUTTONS.CLEAR_FILTERS') }}
         </Button>

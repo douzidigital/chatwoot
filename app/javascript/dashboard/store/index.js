@@ -2,7 +2,9 @@ import { createStore } from 'vuex';
 
 import accounts from './modules/accounts';
 import agentBots from './modules/agentBots';
+import agentCapacityPolicies from './modules/agentCapacityPolicies';
 import agents from './modules/agents';
+import assignmentPolicies from './modules/assignmentPolicies';
 import articles from './modules/helpCenterArticles';
 import attributes from './modules/attributes';
 import auditlogs from './modules/auditlogs';
@@ -23,6 +25,7 @@ import conversations from './modules/conversations';
 import conversationSearch from './modules/conversationSearch';
 import conversationStats from './modules/conversationStats';
 import conversationTypingStatus from './modules/conversationTypingStatus';
+import conversationUnreadCounts from './modules/conversationUnreadCounts';
 import conversationWatchers from './modules/conversationWatchers';
 import csat from './modules/csat';
 import customRole from './modules/customRole';
@@ -30,6 +33,7 @@ import customViews from './modules/customViews';
 import dashboardApps from './modules/dashboardApps';
 import draftMessages from './modules/draftMessages';
 import globalConfig from 'shared/store/globalConfig';
+import groupMembers from './modules/groupMembers';
 import inboxAssignableAgents from './modules/inboxAssignableAgents';
 import inboxes from './modules/inboxes';
 import inboxMembers from './modules/inboxMembers';
@@ -39,8 +43,11 @@ import macros from './modules/macros';
 import notifications from './modules/notifications';
 import portals from './modules/helpCenterPortals';
 import reports from './modules/reports';
+import recurringScheduledMessages from './modules/recurringScheduledMessages';
+import scheduledMessages from './modules/scheduledMessages';
 import sla from './modules/sla';
 import slaReports from './modules/SLAReports';
+import sidebarSortPreferences from './modules/sidebarSortPreferences';
 import summaryReports from './modules/summaryReports';
 import teamMembers from './modules/teamMembers';
 import teams from './modules/teams';
@@ -53,6 +60,11 @@ import captainInboxes from './captain/inboxes';
 import captainBulkActions from './captain/bulkActions';
 import copilotThreads from './captain/copilotThreads';
 import copilotMessages from './captain/copilotMessages';
+import captainScenarios from './captain/scenarios';
+import captainTools from './captain/tools';
+import captainCustomTools from './captain/customTools';
+import internalChat from './modules/internalChat';
+import internalChatTypingStatus from './modules/internalChat/typingStatus';
 
 const plugins = [];
 
@@ -60,7 +72,9 @@ export default createStore({
   modules: {
     accounts,
     agentBots,
+    agentCapacityPolicies,
     agents,
+    assignmentPolicies,
     articles,
     attributes,
     auditlogs,
@@ -81,6 +95,7 @@ export default createStore({
     conversationSearch,
     conversationStats,
     conversationTypingStatus,
+    conversationUnreadCounts,
     conversationWatchers,
     csat,
     customRole,
@@ -88,6 +103,7 @@ export default createStore({
     dashboardApps,
     draftMessages,
     globalConfig,
+    groupMembers,
     inboxAssignableAgents,
     inboxes,
     inboxMembers,
@@ -97,8 +113,11 @@ export default createStore({
     notifications,
     portals,
     reports,
+    recurringScheduledMessages,
+    scheduledMessages,
     sla,
     slaReports,
+    sidebarSortPreferences,
     summaryReports,
     teamMembers,
     teams,
@@ -111,6 +130,11 @@ export default createStore({
     captainBulkActions,
     copilotThreads,
     copilotMessages,
+    captainScenarios,
+    captainTools,
+    captainCustomTools,
+    internalChat,
+    internalChatTypingStatus,
   },
   plugins,
 });

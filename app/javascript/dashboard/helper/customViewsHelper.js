@@ -37,6 +37,13 @@ export const getValuesName = (values, list, idKey, nameKey) => {
   };
 };
 
+const getValuesForContact = (values, contacts) => ({
+  id: values[0],
+  name:
+    contacts?.find(contact => contact.id === values[0])?.name ||
+    `Contact #${values[0]}`,
+});
+
 export const getValuesForStatus = values => {
   return values.map(value => ({ id: value, name: value }));
 };
@@ -73,6 +80,10 @@ const getValuesForPriority = (values, priority) => {
   return priority.filter(option => values.includes(option.id));
 };
 
+const getValuesForGroupType = (values, groupType) => {
+  return groupType.filter(option => values.includes(option.id));
+};
+
 export const getValuesForFilter = (filter, params) => {
   const { attribute_key, values } = filter;
   const {
@@ -84,6 +95,8 @@ export const getValuesForFilter = (filter, params) => {
     campaigns,
     labels,
     priority,
+    group_type: groupType = [],
+    contacts,
   } = params;
   switch (attribute_key) {
     case 'status':
@@ -94,6 +107,8 @@ export const getValuesForFilter = (filter, params) => {
       return getValuesName(values, inboxes, 'id', 'name');
     case 'team_id':
       return getValuesName(values, teams, 'id', 'name');
+    case 'contact_id':
+      return getValuesForContact(values, contacts);
     case 'campaign_id':
       return getValuesName(values, campaigns, 'id', 'title');
     case 'labels':
@@ -104,6 +119,8 @@ export const getValuesForFilter = (filter, params) => {
       return getValuesForLanguages(values, languages);
     case 'country_code':
       return getValuesForCountries(values, countries);
+    case 'group_type':
+      return getValuesForGroupType(values, groupType);
     default:
       return { id: values[0], name: values[0] };
   }

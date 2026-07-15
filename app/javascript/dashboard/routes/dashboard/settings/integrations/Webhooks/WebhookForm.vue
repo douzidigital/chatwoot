@@ -3,6 +3,9 @@ import { useVuelidate } from '@vuelidate/core';
 import { required, url, minLength, or } from '@vuelidate/validators';
 import wootConstants from 'dashboard/constants/globals';
 import { getI18nKey } from 'dashboard/routes/dashboard/settings/helper/settingsHelper';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { useAlert } from 'dashboard/composables';
+import { useConfig } from 'dashboard/composables/useConfig';
 import NextButton from 'dashboard/components-next/button/Button.vue';
 import MultiselectDropdown from 'shared/components/ui/MultiselectDropdown.vue';
 import { useMapGetter } from 'dashboard/composables/store';
@@ -14,12 +17,20 @@ const SUPPORTED_WEBHOOK_EVENTS = [
   'conversation_status_changed',
   'conversation_updated',
   'message_created',
+  'message_incoming',
+  'message_outgoing',
   'message_updated',
   'webwidget_triggered',
   'contact_created',
   'contact_updated',
   'conversation_typing_on',
   'conversation_typing_off',
+  'conversation_recording',
+  'provider_event_received',
+  'internal_chat_message_created',
+  'internal_chat_message_updated',
+  'internal_chat_message_deleted',
+  'internal_chat_channel_updated',
 ];
 
 const localhostUrl = value => {
@@ -75,15 +86,22 @@ export default {
     },
   },
   data() {
+    const { inboxEventsEnabled } = useConfig();
     return {
       url: this.value.url || '',
       assignedInbox: this.value.inbox || null,
       name: this.value.name || '',
       subscriptions: this.value.subscriptions || [],
-      supportedWebhookEvents: SUPPORTED_WEBHOOK_EVENTS,
+      secretVisible: false,
+      supportedWebhookEvents: inboxEventsEnabled
+        ? [...SUPPORTED_WEBHOOK_EVENTS, 'inbox_updated']
+        : SUPPORTED_WEBHOOK_EVENTS,
     };
   },
   computed: {
+    hasSecret() {
+      return !!this.value.secret;
+    },
     inboxesList() {
       if (this.assignedInbox?.id) {
         return [
@@ -118,6 +136,10 @@ export default {
         name: this.name,
         subscriptions: this.subscriptions,
       });
+    },
+    async copySecret() {
+      await copyTextToClipboard(this.value.secret);
+      useAlert(this.$t('INTEGRATION_SETTINGS.WEBHOOK.SECRET.COPY_SUCCESS'));
     },
     onClickAssignInbox(inbox) {
       this.assignedInbox = inbox;
@@ -175,6 +197,35 @@ export default {
           name="name"
           :placeholder="webhookNameInputPlaceholder"
         />
+      </label>
+      <label v-if="hasSecret" class="mb-4">
+        {{ $t('INTEGRATION_SETTINGS.WEBHOOK.SECRET.LABEL') }}
+        <div class="flex items-center gap-2">
+          <input
+            :value="
+              secretVisible ? value.secret : '••••••••••••••••••••••••••••••••'
+            "
+            type="text"
+            readonly
+            class="!mb-0 font-mono"
+          />
+          <NextButton
+            v-tooltip.top="$t('INTEGRATION_SETTINGS.WEBHOOK.SECRET.TOGGLE')"
+            type="button"
+            :icon="secretVisible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+            slate
+            faded
+            @click="secretVisible = !secretVisible"
+          />
+          <NextButton
+            v-tooltip.top="$t('INTEGRATION_SETTINGS.WEBHOOK.SECRET.COPY')"
+            type="button"
+            icon="i-lucide-copy"
+            slate
+            faded
+            @click="copySecret"
+          />
+        </div>
       </label>
       <label :class="{ error: v$.url.$error }" class="mb-2">
         {{ $t('INTEGRATION_SETTINGS.WEBHOOK.FORM.SUBSCRIPTIONS.LABEL') }}

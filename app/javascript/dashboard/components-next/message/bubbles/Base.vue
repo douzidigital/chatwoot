@@ -2,17 +2,38 @@
 import { computed } from 'vue';
 
 import MessageMeta from '../MessageMeta.vue';
+import ReferralCard from './ReferralCard.vue';
 
 import { emitter } from 'shared/helpers/mitt';
 import { useMessageContext } from '../provider.js';
 import { useI18n } from 'vue-i18n';
 
+import MessageFormatter from 'shared/helpers/MessageFormatter.js';
 import { BUS_EVENTS } from 'shared/constants/busEvents';
 import { MESSAGE_VARIANTS, ORIENTATION } from '../constants';
 
-const { variant, orientation, inReplyTo, shouldGroupWithNext } =
-  useMessageContext();
+const props = defineProps({
+  hideMeta: { type: Boolean, default: false },
+});
+
+const {
+  variant,
+  orientation,
+  inReplyTo,
+  shouldGroupWithNext,
+  additionalAttributes,
+  contentAttributes,
+} = useMessageContext();
 const { t } = useI18n();
+
+// Click-to-WhatsApp ad metadata attached to the first message after an ad click.
+const referral = computed(() => contentAttributes.value?.referral);
+
+// The contact deleted/revoked this message on WhatsApp. We keep the content
+// readable but mute the bubble and add a dashed border to signal the deletion.
+const deletedByContact = computed(
+  () => contentAttributes.value?.deletedByContact === true
+);
 
 const varaintBaseMap = {
   [MESSAGE_VARIANTS.AGENT]: 'bg-n-solid-blue text-n-slate-12',
@@ -46,6 +67,16 @@ const flexOrientationClass = computed(() => {
   return map[orientation.value];
 });
 
+const isScheduledMessage = computed(
+  () => !!additionalAttributes.value?.scheduledMessageId
+);
+
+const scheduledMessageClass = computed(() => {
+  if (!isScheduledMessage.value) return '';
+  if (variant.value === MESSAGE_VARIANTS.AGENT) return 'bg-n-solid-iris';
+  return '';
+});
+
 const messageClass = computed(() => {
   const classToApply = [varaintBaseMap[variant.value]];
 
@@ -53,6 +84,14 @@ const messageClass = computed(() => {
     classToApply.push(orientationMap[orientation.value]);
   } else {
     classToApply.push('rounded-lg');
+  }
+
+  if (scheduledMessageClass.value) {
+    classToApply.push(scheduledMessageClass.value);
+  }
+
+  if (deletedByContact.value) {
+    classToApply.push('border-2 border-dashed border-n-slate-7 opacity-75');
   }
 
   return classToApply;
@@ -64,12 +103,19 @@ const scrollToMessage = () => {
   });
 };
 
+const shouldShowMeta = computed(
+  () =>
+    !props.hideMeta &&
+    !shouldGroupWithNext.value &&
+    variant.value !== MESSAGE_VARIANTS.ACTIVITY
+);
+
 const replyToPreview = computed(() => {
   if (!inReplyTo) return '';
 
   const { content, attachments } = inReplyTo.value;
 
-  if (content) return content;
+  if (content) return new MessageFormatter(content).formattedMessage;
   if (attachments?.length) {
     const firstAttachment = attachments[0];
     const fileType = firstAttachment.fileType ?? firstAttachment.file_type;
@@ -83,7 +129,7 @@ const replyToPreview = computed(() => {
 
 <template>
   <div
-    class="text-sm"
+    class="text-sm min-w-0"
     :class="[
       messageClass,
       {
@@ -91,18 +137,20 @@ const replyToPreview = computed(() => {
       },
     ]"
   >
+    <ReferralCard v-if="referral" :referral="referral" />
     <div
       v-if="inReplyTo"
-      class="bg-n-alpha-black1 rounded-lg p-2 -mx-1 mb-2 cursor-pointer"
+      class="p-2 -mx-1 mb-2 rounded-lg cursor-pointer bg-n-alpha-black1"
       @click="scrollToMessage"
     >
-      <span class="line-clamp-2 break-all">
-        {{ replyToPreview }}
-      </span>
+      <div
+        v-dompurify-html="replyToPreview"
+        class="prose prose-bubble line-clamp-2"
+      />
     </div>
     <slot />
     <MessageMeta
-      v-if="!shouldGroupWithNext && variant !== MESSAGE_VARIANTS.ACTIVITY"
+      v-if="shouldShowMeta"
       :class="[
         flexOrientationClass,
         variant === MESSAGE_VARIANTS.EMAIL ? 'px-3 pb-3' : '',

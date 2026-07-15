@@ -33,6 +33,13 @@ describe('#MessageFormatter', () => {
 <h2>tool</h2>`
       );
     });
+
+    it('should not render a setext heading when text is followed by "--"', () => {
+      const message = 'hy\n\n\\\n\\-\\-\n\nHello there';
+      const result = new MessageFormatter(message).formattedMessage;
+      expect(result).not.toMatch('<h2>');
+      expect(result).not.toMatch('<h1>');
+    });
   });
 
   describe('content with image and has "cw_image_height" query at the end of URL', () => {
@@ -119,6 +126,16 @@ describe('#MessageFormatter', () => {
     });
   });
 
+  describe('help center table colwidth marker', () => {
+    it('strips the internal colwidths marker from rendered output', () => {
+      const message =
+        '<!--cw-colwidths:120,200-->\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+      const formatter = new MessageFormatter(message);
+      expect(formatter.formattedMessage).not.toContain('cw-colwidths');
+      expect(formatter.plainText).not.toContain('cw-colwidths');
+    });
+  });
+
   describe('#sanitize', () => {
     it('sanitizes markup and removes all unnecessary elements', () => {
       const message =
@@ -127,6 +144,33 @@ describe('#MessageFormatter', () => {
         `<p>[xssLink](javascript:alert(document.cookie))<br />
 <a href="https://google.com" class="link" rel="noreferrer noopener nofollow" target="_blank">normalLink</a><strong>I am a bold text paragraph</strong></p>`
       );
+    });
+  });
+
+  describe('conversation mentions', () => {
+    it('renders conversation mention with # prefix', () => {
+      const message = '[@42](mention://conversation/42/42)';
+      const result = new MessageFormatter(message).formattedMessage;
+      expect(result).toContain('#42');
+      expect(result).toContain('prosemirror-mention-conversation');
+      expect(result).not.toContain('@42');
+    });
+
+    it('includes data-conversation-id attribute', () => {
+      const message = '[@99](mention://conversation/99/99)';
+      const result = new MessageFormatter(message).formattedMessage;
+      expect(result).toContain('data-conversation-id="99"');
+    });
+
+    it('renders both user and conversation mentions in mixed content', () => {
+      const message =
+        'Hey [@John](mention://user/1/John) check [@42](mention://conversation/42/42)';
+      const result = new MessageFormatter(message).formattedMessage;
+      expect(result).toContain(
+        '<span class="prosemirror-mention-node">@John</span>'
+      );
+      expect(result).toContain('#42');
+      expect(result).toContain('prosemirror-mention-conversation');
     });
   });
 });

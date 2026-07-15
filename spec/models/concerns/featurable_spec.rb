@@ -1,57 +1,28 @@
+# frozen_string_literal: true
+
 require 'rails_helper'
 
 RSpec.describe Featurable do
-  let(:account) { create(:account) }
-
-  describe 'WhatsApp embedded signup feature' do
-    it 'is disabled by default' do
-      expect(account.feature_whatsapp_embedded_signup?).to be false
-      expect(account.feature_enabled?('whatsapp_embedded_signup')).to be false
+  describe '.feature_flag_value' do
+    it 'returns 0 for unknown features' do
+      expect(described_class.feature_flag_value('nonexistent_feature')).to eq(0)
     end
 
-    describe '#enable_features!' do
-      it 'enables the whatsapp embedded signup feature' do
-        account.enable_features!(:whatsapp_embedded_signup)
-        expect(account.feature_whatsapp_embedded_signup?).to be true
-        expect(account.feature_enabled?('whatsapp_embedded_signup')).to be true
-      end
-
-      it 'enables multiple features at once' do
-        account.enable_features!(:whatsapp_embedded_signup, :help_center)
-        expect(account.feature_whatsapp_embedded_signup?).to be true
-        expect(account.feature_help_center?).to be true
-      end
+    it 'returns the unsigned bit value for low-position features' do
+      first_feature = described_class::FEATURE_LIST.first['name']
+      expect(described_class.feature_flag_value(first_feature)).to eq(1)
     end
 
-    describe '#disable_features!' do
-      before do
-        account.enable_features!(:whatsapp_embedded_signup)
-      end
+    it 'returns the signed two\'s complement representation for high-position features' do
+      stub_const(
+        "#{described_class}::FEATURE_LIST",
+        Array.new(64) { |i| { 'name' => "feature_#{i}" } }.freeze
+      )
 
-      it 'disables the whatsapp embedded signup feature' do
-        expect(account.feature_whatsapp_embedded_signup?).to be true
-
-        account.disable_features!(:whatsapp_embedded_signup)
-        expect(account.feature_whatsapp_embedded_signup?).to be false
-      end
-    end
-
-    describe '#enabled_features' do
-      it 'includes whatsapp_embedded_signup when enabled' do
-        account.enable_features!(:whatsapp_embedded_signup)
-        expect(account.enabled_features).to include('whatsapp_embedded_signup' => true)
-      end
-
-      it 'does not include whatsapp_embedded_signup when disabled' do
-        account.disable_features!(:whatsapp_embedded_signup)
-        expect(account.enabled_features).not_to include('whatsapp_embedded_signup' => true)
-      end
-    end
-
-    describe '#all_features' do
-      it 'includes whatsapp_embedded_signup in all features list' do
-        expect(account.all_features).to have_key('whatsapp_embedded_signup')
-      end
+      # Position 64 (0-indexed 63) is the sign bit on signed bigint.
+      expect(described_class.feature_flag_value('feature_63')).to eq(-(1 << 63))
+      # Lower positions stay positive.
+      expect(described_class.feature_flag_value('feature_62')).to eq(1 << 62)
     end
   end
 end

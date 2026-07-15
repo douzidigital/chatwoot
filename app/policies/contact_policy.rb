@@ -47,7 +47,13 @@ class ContactPolicy < ApplicationPolicy
     true
   end
 
+  def sync_group?
+    true
+  end
+
   def destroy?
     @account_user.administrator?
   end
 end
+
+ContactPolicy.prepend_mod_with('ContactPolicy')
